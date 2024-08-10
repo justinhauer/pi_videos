@@ -1,72 +1,75 @@
 import os
 import time
-from datetime import datetime, timedelta
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import logging
+from typing import Optional, Dict, Any
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import io
+import subprocess
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Set up Google Drive API credentials
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+creds = Credentials.from_authorized_user_file('credentials.json', SCOPES)
+drive_service = build('drive', 'v3', credentials=creds)
 
 # Configuration
-GOOGLE_SLIDES_URL: str = "https://docs.google.com/presentation"
-USERNAME: str = "your_username"
-PASSWORD: str = "your_password"
-FOLDER_PATH: str = "/path/to/your/folder"
-MAX_RUNTIME: timedelta = timedelta(days=2)
+GOOGLE_DRIVE_FOLDER_ID = 'your_folder_id_here'
+DOWNLOAD_PATH = '/path/to/download/folder/'
+LIBREOFFICE_PATH = '/usr/bin/libreoffice'  # Adjust if necessary
 
 
-def login_to_google(driver):
-    driver.get(GOOGLE_SLIDES_URL)
-
-    # Wait for and fill in the username
-    username_field = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.ID, "identifierId"))
-    )
-    username_field.send_keys(USERNAME)
-    driver.find_element(By.ID, "identifierNext").click()
-
-    # Wait for and fill in the password
-    password_field = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.NAME, "password"))
-    )
-    password_field.send_keys(PASSWORD)
-    driver.find_element(By.ID, "passwordNext").click()
+def get_latest_file() -> Optional[Dict[str, Any]]:
+    results = drive_service.files().list(
+        q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.presentation'",
+        orderBy='modifiedTime desc',
+        pageSize=1,
+        fields="files(id, name)"
+    ).execute()
+    items = results.get('files', [])
+    if not items:
+        logger.info('No files found.')
+        return None
+    return items[0]
 
 
-def get_latest_slide_deck(folder_path):
-    files = [f for f in os.listdir(folder_path) if f.endswith('.gdoc')]
-    if not files:
-        raise FileNotFoundError("No Google Slides files found in the specified folder.")
-    return max(files, key=lambda x: os.path.getmtime(os.path.join(folder_path, x)))
+def download_file(file_id: str, file_name: str) -> str:
+    request = drive_service.files().export_media(fileId=file_id, mimeType='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    file_path = os.path.join(DOWNLOAD_PATH, file_name)
+    with io.FileIO(file_path, 'wb') as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+            logger.info(f"Download {int(status.progress() * 100)}%")
+    return file_path
 
 
-def play_slideshow(driver, file_path):
-    # Open the file (you may need to adjust this part depending on how your files are organized)
-    driver.get(f"file://{file_path}")
-
-    # Wait for the presentation to load and start the slideshow
-    start_button = WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.XPATH, "//div[text()='Start slideshow']"))
-    )
-    start_button.click()
+def play_slideshow(file_path: str) -> None:
+    cmd = [LIBREOFFICE_PATH, '--show', file_path]
+    process = subprocess.Popen(cmd)
+    time.sleep(48 * 3600)  # Sleep for 48 hours
+    process.terminate()
 
 
-def run_slideshow():
-    options = webdriver.ChromeOptions()
-    options.add_argument("--kiosk")  # This will open Chrome in fullscreen mode
-    driver: webdriver = webdriver.Chrome(options=options)
-
-    try:
-        login_to_google(driver)
-        latest_deck = get_latest_slide_deck(FOLDER_PATH)
-        play_slideshow(driver, os.path.join(FOLDER_PATH, latest_deck))
-
-        start_time = datetime.now()
-        while datetime.now() - start_time < MAX_RUNTIME:
-            time.sleep(60)  # Check every minute if we've exceeded the max runtime
-
-    finally:
-        driver.quit()
+def cleanup(file_path: str) -> None:
+    os.remove(file_path)
+    logger.info(f"Removed file: {file_path}")
 
 
-if __name__ == "__main__":
-    run_slideshow()
+def main() -> None:
+    latest_file = get_latest_file()
+    if latest_file:
+        file_path = download_file(latest_file['id'], latest_file['name'])
+        play_slideshow(file_path)
+        cleanup(file_path)
+    else:
+        logger.warning("No presentation file found in the specified Google Drive folder.")
+
+
+if __name__ == '__main__':
+    main()
