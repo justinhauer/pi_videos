@@ -83,7 +83,7 @@ def play_slideshow(file_path: str) -> None:
     Args:
         file_path (str): The full path to the presentation file to be played.
     """
-    cmd: List[str] = [LIBREOFFICE_PATH, "--show", file_path]
+    cmd: List[str] = [LIBREOFFICE_PATH, '--impress', "--show", file_path]
     process: subprocess.Popen = subprocess.Popen(cmd)
     time.sleep(48 * 3600)  # Sleep for 48 hours
     process.terminate()
