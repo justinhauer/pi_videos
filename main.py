@@ -8,11 +8,16 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 import subprocess
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+# Set up logging with date in filename
+current_date: str = time.strftime("%Y-%m-%d")
+file_handler: logging.FileHandler = logging.FileHandler(f"app_{current_date}.log")
+formatter: logging.Formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(message)s"
 )
-logger: logging.Logger = logging.getLogger(__name__)
+file_handler.setFormatter(formatter)
+logger: logging.Logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
 
 # Set up Google Drive API credentials
 SCOPES: List[str] = ["https://www.googleapis.com/auth/drive.readonly"]
@@ -20,9 +25,11 @@ creds: Credentials = Credentials.from_authorized_user_file("credentials.json", S
 drive_service: Any = build("drive", "v3", credentials=creds)
 
 # Configuration
-GOOGLE_DRIVE_FOLDER_ID: str = "your_folder_id_here"
-DOWNLOAD_PATH: str = "/path/to/download/folder/"
-LIBREOFFICE_PATH: str = "/usr/bin/libreoffice"  # Adjust if necessary
+GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "your_folder_id_here")
+DOWNLOAD_PATH: str = os.getenv("DOWNLOAD_PATH", "/path/to/download/folder/")
+LIBREOFFICE_PATH: str = os.getenv(
+    "LIBREOFFICE_PATH", "/usr/bin/libreoffice"
+)  # Adjust if necessary
 
 
 def get_latest_file() -> Optional[Dict[str, Any]]:
@@ -83,9 +90,9 @@ def play_slideshow(file_path: str) -> None:
     Args:
         file_path (str): The full path to the presentation file to be played.
     """
-    cmd: List[str] = [LIBREOFFICE_PATH, '--impress', "--show", file_path]
+    cmd: List[str] = [LIBREOFFICE_PATH, "--impress", "--show", file_path]
     process: subprocess.Popen = subprocess.Popen(cmd)
-    time.sleep(48 * 3600)  # Sleep for 48 hours
+    time.sleep(144 * 3600)  # Sleep for 48 hours
     process.terminate()
 
 
