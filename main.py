@@ -2,9 +2,11 @@ import os
 import time
 import logging
 from typing import Optional, Dict, Any, List
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 import io
 import subprocess
 
@@ -21,15 +23,33 @@ logger.addHandler(file_handler)
 
 # Set up Google Drive API credentials
 SCOPES: List[str] = ["https://www.googleapis.com/auth/drive.readonly"]
-creds: Credentials = Credentials.from_authorized_user_file("credentials.json", SCOPES)
+
+creds = None
+# The file token.json stores the user's access and refresh tokens, and is
+# created automatically when the authorization flow completes for the first time.
+if os.path.exists("token.json"):
+    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+# If there are no (valid) credentials available, let the user log in.
+if not creds or not creds.valid:
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            "credentials.json", SCOPES
+        )
+        creds = flow.run_local_server(port=0)
+    # Save the credentials for the next run
+    with open("token.json", "w") as token:
+        token.write(creds.to_json())
+
 drive_service: Any = build("drive", "v3", credentials=creds)
 
 # Configuration
-GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "your_folder_id_here")
-DOWNLOAD_PATH: str = os.getenv("DOWNLOAD_PATH", "/path/to/download/folder/")
+GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "15f0fYEHqzRttjf99I8L8RI5l0-c15WaN")
+DOWNLOAD_PATH: str = os.getenv("DOWNLOAD_PATH", "/test_folder/")
 LIBREOFFICE_PATH: str = os.getenv(
     "LIBREOFFICE_PATH", "/usr/bin/libreoffice"
-)  # Adjust if necessary
+)
 
 
 def get_latest_file() -> Optional[Dict[str, Any]]:
@@ -40,21 +60,26 @@ def get_latest_file() -> Optional[Dict[str, Any]]:
         Optional[Dict[str, Any]]: A dictionary containing the file's 'id' and 'name' if found,
         or None if no files are found.
     """
-    results: Dict[str, Any] = (
-        drive_service.files()
-        .list(
-            q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.presentation'",
-            orderBy="modifiedTime desc",
-            pageSize=1,
-            fields="files(id, name)",
+    try:
+        results: Dict[str, Any] = (
+            drive_service.files()
+            .list(
+                q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.presentation'",
+                orderBy="modifiedTime desc",
+                pageSize=1,
+                fields="files(id, name)",
+            )
+            .execute()
         )
-        .execute()
-    )
-    items: List[Dict[str, Any]] = results.get("files", [])
-    if not items:
-        logger.info("No files found.")
+        items: List[Dict[str, Any]] = results.get("files", [])
+        if not items:
+            logger.info("No files found.")
+            return None
+        print(f"item is {items[0]}")
+        return items[0]
+    except Exception as e:
+        logger.error(f"An error occurred while retrieving files: {e}")
         return None
-    return items[0]
 
 
 def download_file(file_id: str, file_name: str) -> str:
@@ -68,19 +93,24 @@ def download_file(file_id: str, file_name: str) -> str:
     Returns:
         str: The full path of the downloaded file.
     """
-    request: Any = drive_service.files().export_media(
-        fileId=file_id,
-        mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    )
     file_path: str = os.path.join(DOWNLOAD_PATH, file_name)
-    with io.FileIO(file_path, "wb") as fh:
-        downloader: MediaIoBaseDownload = MediaIoBaseDownload(fh, request)
-        done: bool = False
-        while done is False:
-            status: Any
-            status, done = downloader.next_chunk()
-            logger.info(f"Download {int(status.progress() * 100)}%")
-    return file_path
+    try:
+        request: Any = drive_service.files().export_media(
+            fileId=file_id,
+            mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        with io.FileIO(file_path, "wb") as fh:
+            downloader: MediaIoBaseDownload = MediaIoBaseDownload(fh, request)
+            done: bool = False
+            while done is False:
+                status: Any
+                status, done = downloader.next_chunk()
+                logger.info(f"Download {int(status.progress() * 100)}%")
+        print(file_path)
+        return file_path
+    except Exception as e:
+        logger.error(f"An error occurred while downloading the file: {e}")
+        return ""
 
 
 def play_slideshow(file_path: str) -> None:
