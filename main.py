@@ -1,56 +1,68 @@
 import os
 import time
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Generator
 from googleapiclient.http import MediaIoBaseDownload
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import io
 import subprocess
 
-# Set up logging with date in filename
-current_date: str = time.strftime("%Y-%m-%d")
-file_handler: logging.FileHandler = logging.FileHandler(f"app_{current_date}.log")
-formatter: logging.Formatter = logging.Formatter(
-    "%(asctime)s - %(levelname)s - %(message)s"
+# Set up logging to standard output
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
-file_handler.setFormatter(formatter)
-logger: logging.Logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
 
 # Set up Google Drive API credentials
 SCOPES: List[str] = ["https://www.googleapis.com/auth/drive.readonly"]
 
-creds = None
-# The file token.json stores the user's access and refresh tokens, and is
-# created automatically when the authorization flow completes for the first time.
-if os.path.exists("token.json"):
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-# If there are no (valid) credentials available, let the user log in.
-if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            "credentials.json", SCOPES
-        )
-        creds = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open("token.json", "w") as token:
-        token.write(creds.to_json())
+# Load the service account credentials from the JSON file
+SERVICE_ACCOUNT_FILE: str = "credentials.json"
+creds: service_account.Credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+)
 
 drive_service: Any = build("drive", "v3", credentials=creds)
 
 # Configuration
 GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "15f0fYEHqzRttjf99I8L8RI5l0-c15WaN")
-DOWNLOAD_PATH: str = os.getenv("DOWNLOAD_PATH", "/test_folder/")
+DOWNLOAD_PATH: str = os.getcwd()
 LIBREOFFICE_PATH: str = os.getenv(
     "LIBREOFFICE_PATH", "/usr/bin/libreoffice"
 )
 
+def get_files_from_drive(folder_id: str) -> Generator[Dict[str, Any], None, None]:
+    """
+    Retrieve the presentation files from the specified Google Drive folder, one at a time.
+
+    Args:
+        folder_id (str): The Google Drive folder ID to search.
+
+    Yields:
+        Dict[str, Any]: A dictionary containing the file's 'id' and 'name'.
+    """
+    try:
+        page_token: Optional[str] = None
+        while True:
+            results: Dict[str, Any] = drive_service.files().list(
+                q=f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.presentation'",
+                orderBy="modifiedTime desc",
+                pageSize=10,
+                pageToken=page_token,
+                fields="nextPageToken, files(id, name)",
+            ).execute()
+            items: List[Dict[str, Any]] = results.get("files", [])
+            if not items:
+                break
+            for item in items:
+                yield item
+            page_token = results.get("nextPageToken", None)
+            if not page_token:
+                break
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving files: {e}")
 
 def get_latest_file() -> Optional[Dict[str, Any]]:
     """
@@ -61,26 +73,14 @@ def get_latest_file() -> Optional[Dict[str, Any]]:
         or None if no files are found.
     """
     try:
-        results: Dict[str, Any] = (
-            drive_service.files()
-            .list(
-                q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.presentation'",
-                orderBy="modifiedTime desc",
-                pageSize=1,
-                fields="files(id, name)",
-            )
-            .execute()
-        )
-        items: List[Dict[str, Any]] = results.get("files", [])
-        if not items:
-            logger.info("No files found.")
-            return None
-        print(f"item is {items[0]}")
-        return items[0]
-    except Exception as e:
-        logger.error(f"An error occurred while retrieving files: {e}")
+        files_generator = get_files_from_drive(GOOGLE_DRIVE_FOLDER_ID)
+        for file_info in files_generator:
+            return file_info
+        logging.info("No files found.")
         return None
-
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving files: {e}")
+        return None
 
 def download_file(file_id: str, file_name: str) -> str:
     """
@@ -100,18 +100,17 @@ def download_file(file_id: str, file_name: str) -> str:
             mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
         with io.FileIO(file_path, "wb") as fh:
-            downloader: MediaIoBaseDownload = MediaIoBaseDownload(fh, request)
+            downloader: MediaIoBaseDownload = MediaIoBaseDownload(fh, request, chunksize=1024 * 1024)
             done: bool = False
             while done is False:
                 status: Any
                 status, done = downloader.next_chunk()
-                logger.info(f"Download {int(status.progress() * 100)}%")
+                logging.info(f"Download {int(status.progress() * 100)}%")
         print(file_path)
         return file_path
     except Exception as e:
-        logger.error(f"An error occurred while downloading the file: {e}")
+        logging.error(f"An error occurred while downloading the file: {e}")
         return ""
-
 
 def play_slideshow(file_path: str) -> None:
     """
@@ -125,7 +124,6 @@ def play_slideshow(file_path: str) -> None:
     time.sleep(144 * 3600)  # Sleep for 48 hours
     process.terminate()
 
-
 def cleanup(file_path: str) -> None:
     """
     Remove the specified file from the filesystem.
@@ -134,8 +132,7 @@ def cleanup(file_path: str) -> None:
         file_path (str): The full path of the file to be removed.
     """
     os.remove(file_path)
-    logger.info(f"Removed file: {file_path}")
-
+    logging.info(f"Removed file: {file_path}")
 
 def main() -> None:
     """
@@ -151,10 +148,9 @@ def main() -> None:
         play_slideshow(file_path)
         cleanup(file_path)
     else:
-        logger.warning(
+        logging.warning(
             "No presentation file found in the specified Google Drive folder."
         )
-
 
 if __name__ == "__main__":
     main()
