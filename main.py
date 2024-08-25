@@ -26,12 +26,14 @@ creds: service_account.Credentials = service_account.Credentials.from_service_ac
 
 drive_service: Any = build("drive", "v3", credentials=creds)
 
-# Configuration
+# Configuration, change folder ID
 GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "15f0fYEHqzRttjf99I8L8RI5l0-c15WaN")
 DOWNLOAD_PATH: str = os.getcwd()
 LIBREOFFICE_PATH: str = os.getenv(
     "LIBREOFFICE_PATH", "/usr/bin/libreoffice"
 )
+DAYS_TO_RUN: int = int(os.getenv("DAYS_TO_RUN", 6))
+
 
 def get_files_from_drive(folder_id: str) -> Generator[Dict[str, Any], None, None]:
     """
@@ -64,6 +66,7 @@ def get_files_from_drive(folder_id: str) -> Generator[Dict[str, Any], None, None
     except Exception as e:
         logging.error(f"An error occurred while retrieving files: {e}")
 
+
 def get_latest_file() -> Optional[Dict[str, Any]]:
     """
     Retrieve the most recently modified presentation file from the specified Google Drive folder.
@@ -81,6 +84,7 @@ def get_latest_file() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logging.error(f"An error occurred while retrieving files: {e}")
         return None
+
 
 def download_file(file_id: str, file_name: str) -> str:
     """
@@ -112,6 +116,7 @@ def download_file(file_id: str, file_name: str) -> str:
         logging.error(f"An error occurred while downloading the file: {e}")
         return ""
 
+
 def play_slideshow(file_path: str) -> None:
     """
     Launch LibreOffice to play the slideshow and wait for 48 hours before terminating.
@@ -121,8 +126,9 @@ def play_slideshow(file_path: str) -> None:
     """
     cmd: List[str] = [LIBREOFFICE_PATH, "--impress", "--show", file_path]
     process: subprocess.Popen = subprocess.Popen(cmd)
-    time.sleep(144 * 3600)  # Sleep for 48 hours
+    time.sleep(DAYS_TO_RUN * 24 * 3600)
     process.terminate()
+
 
 def cleanup(file_path: str) -> None:
     """
@@ -133,6 +139,7 @@ def cleanup(file_path: str) -> None:
     """
     os.remove(file_path)
     logging.info(f"Removed file: {file_path}")
+
 
 def main() -> None:
     """
@@ -151,6 +158,7 @@ def main() -> None:
         logging.warning(
             "No presentation file found in the specified Google Drive folder."
         )
+
 
 if __name__ == "__main__":
     main()
