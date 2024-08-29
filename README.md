@@ -1,8 +1,7 @@
 # Raspberry Pi Video Auto Play
 
 ## Summary
-- This repository houses code intended to upload to a Raspberry Pi. 
-- Once the code is uploaded to the raspberry pi, the code will:
+This repository houses code intended to upload to a Raspberry Pi. Once the code is uploaded to the raspberry pi and configured, the code will:
   - Pull the latest Google slides document (a slide deck like powerpoint) from Google drive in a designated folder
   - Play the slide deck for a designated period of time (set to run for 6 days)
   - Once the number of days has been reached, the slide deck will stop running (Runs in Libre Office)

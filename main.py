@@ -6,7 +6,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import io
-import subprocess
+import uno
 
 # Set up logging to standard output
 logging.basicConfig(
@@ -124,10 +124,32 @@ def play_slideshow(file_path: str) -> None:
     Args:
         file_path (str): The full path to the presentation file to be played.
     """
-    cmd: List[str] = [LIBREOFFICE_PATH, "--impress", "--show", file_path]
-    process: subprocess.Popen = subprocess.Popen(cmd)
-    time.sleep(DAYS_TO_RUN * 24 * 3600)
-    process.terminate()
+    try:
+        # Get the local context for UNO
+        local_context = uno.getComponentContext()
+
+        # Create the UNO service manager
+        service_manager = local_context.ServiceManager
+
+        # Create the UNO desktop instance
+        desktop = service_manager.createInstanceWithContext("com.sun.star.frame.Desktop", local_context)
+
+        # Load the presentation file
+        document = desktop.loadComponentFromURL(f"file:///{file_path}", "_blank", 0, ())
+
+        # Get the presentation controller
+        controller = document.getCurrentController()
+
+        # Start the slideshow
+        controller.startPresentation(True)
+
+        # Wait for the specified duration
+        time.sleep(DAYS_TO_RUN * 24 * 3600)
+
+        # Terminate the presentation
+        controller.endPresentation()
+    except Exception as e:
+        logging.error(f"An error occurred while playing the slideshow: {e}")
 
 
 def cleanup(file_path: str) -> None:
