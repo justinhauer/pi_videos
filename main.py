@@ -6,7 +6,8 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import io
-import uno
+import pyautogui
+import subprocess
 
 # Set up logging to standard output
 logging.basicConfig(
@@ -119,38 +120,36 @@ def download_file(file_id: str, file_name: str) -> str:
 
 def play_slideshow(file_path: str) -> None:
     """
-    Launch LibreOffice to play the slideshow and wait for 48 hours before terminating.
+    Launch LibreOffice to play the slideshow and wait for the specified duration before terminating.
 
     Args:
         file_path (str): The full path to the presentation file to be played.
     """
     try:
-        # Get the local context for UNO
-        local_context = uno.getComponentContext()
+        # Start LibreOffice Impress
+        process = subprocess.Popen([LIBREOFFICE_PATH, "--impress", file_path])
 
-        # Create the UNO service manager
-        service_manager = local_context.ServiceManager
+        # Wait for LibreOffice to start (adjust if needed)
+        time.sleep(10)
 
-        # Create the UNO desktop instance
-        desktop = service_manager.createInstanceWithContext("com.sun.star.frame.Desktop", local_context)
-
-        # Load the presentation file
-        document = desktop.loadComponentFromURL(f"file:///{file_path}", "_blank", 0, ())
-
-        # Get the presentation controller
-        controller = document.getCurrentController()
-
-        # Start the slideshow
-        controller.startPresentation(True)
+        # Simulate pressing F5 twice to start the presentation
+        pyautogui.press('f5')
+        time.sleep(0.5)  # Short delay between key presses
+        pyautogui.press('f5')
 
         # Wait for the specified duration
         time.sleep(DAYS_TO_RUN * 24 * 3600)
 
         # Terminate the presentation
-        controller.endPresentation()
+        process.terminate()
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+        logging.info(f"Slideshow played for {DAYS_TO_RUN} days and terminated.")
     except Exception as e:
         logging.error(f"An error occurred while playing the slideshow: {e}")
-
 
 def cleanup(file_path: str) -> None:
     """
