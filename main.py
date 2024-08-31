@@ -6,7 +6,6 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import io
-import pyautogui
 import subprocess
 
 # Set up logging to standard output
@@ -118,38 +117,45 @@ def download_file(file_id: str, file_name: str) -> str:
         return ""
 
 
-def play_slideshow(file_path: str) -> None:
+def play_video(file_path: str) -> None:
     """
-    Launch LibreOffice to play the slideshow and wait for the specified duration before terminating.
+    Launch VLC to play the video and wait for the specified duration before terminating.
 
     Args:
-        file_path (str): The full path to the presentation file to be played.
+        file_path (str): The full path to the MP4 file to be played.
     """
     try:
-        # Start LibreOffice Impress
-        process = subprocess.Popen([LIBREOFFICE_PATH, "--impress", file_path])
+        # Ensure DISPLAY is set for GUI applications
+        os.environ['DISPLAY'] = ':0'
 
-        # Wait for LibreOffice to start (adjust if needed)
-        time.sleep(10)
+        # VLC command to start video in fullscreen and loop
+        vlc_cmd = [
+            "cvlc",  # Use cvlc (console VLC) to avoid any GUI dialogs
+            "--fullscreen",  # Start in fullscreen mode
+            "--loop",  # Loop the video
+            "--no-osd",  # No on-screen display
+            "--no-video-title-show",  # Don't show the title of the video
+            file_path  # Path to the video file
+        ]
 
-        # Simulate pressing F5 twice to start the presentation
-        pyautogui.press('f5')
-        time.sleep(0.5)  # Short delay between key presses
-        pyautogui.press('f5')
+        # Start VLC
+        process = subprocess.Popen(vlc_cmd)
+
+        logging.info(f"Started playing video: {file_path}")
 
         # Wait for the specified duration
         time.sleep(DAYS_TO_RUN * 24 * 3600)
 
-        # Terminate the presentation
+        # Terminate VLC
         process.terminate()
         try:
             process.wait(timeout=30)
         except subprocess.TimeoutExpired:
             process.kill()
 
-        logging.info(f"Slideshow played for {DAYS_TO_RUN} days and terminated.")
+        logging.info(f"Video played for {DAYS_TO_RUN} days and terminated.")
     except Exception as e:
-        logging.error(f"An error occurred while playing the slideshow: {e}")
+        logging.error(f"An error occurred while playing the video: {e}")
 
 def cleanup(file_path: str) -> None:
     """
@@ -173,7 +179,7 @@ def main() -> None:
     latest_file: Optional[Dict[str, Any]] = get_latest_file()
     if latest_file:
         file_path: str = download_file(latest_file["id"], latest_file["name"])
-        play_slideshow(file_path)
+        play_video(file_path)
         cleanup(file_path)
     else:
         logging.warning(
