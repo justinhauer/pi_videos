@@ -126,31 +126,95 @@ def download_file(file_id: str, file_name: str) -> str:
         return ""
 
 
+import os
+import time
+import logging
+from typing import Optional, Dict, Any, List, Generator
+from googleapiclient.http import MediaIoBaseDownload
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+import io
+import subprocess
+
+
+# ... (previous imports and setup code remains the same)
+
+def convert_video(input_path: str) -> str:
+    """
+    Convert the input video to H.264 format using FFmpeg.
+
+    Args:
+        input_path (str): The path to the input video file.
+
+    Returns:
+        str: The path to the converted video file.
+    """
+    output_path = os.path.splitext(input_path)[0] + "_converted.mp4"
+    try:
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            output_path
+        ]
+
+        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            logging.error(f"FFmpeg conversion failed: {stderr.decode()}")
+            return input_path
+
+        logging.info(f"Video converted successfully: {output_path}")
+        return output_path
+    except Exception as e:
+        logging.error(f"An error occurred during video conversion: {e}")
+        return input_path
+
+
 def play_video(file_path: str) -> None:
     """
-    Launch VLC to play the video and wait for the specified duration before terminating.
+    Convert the video, then launch VLC to play it with optimized settings.
 
     Args:
         file_path (str): The full path to the video file to be played.
     """
     try:
+        # Convert the video
+        converted_file_path = convert_video(file_path)
+
         # Ensure DISPLAY is set for GUI applications
         os.environ['DISPLAY'] = ':0'
 
-        # VLC command to start video in fullscreen and loop
+        # VLC command with optimized settings
         vlc_cmd = [
-            "cvlc",  # Use cvlc (console VLC) to avoid any GUI dialogs
-            "--fullscreen",  # Start in fullscreen mode
-            "--loop",  # Loop the video
-            "--no-osd",  # No on-screen display
-            "--no-video-title-show",  # Don't show the title of the video
-            file_path  # Path to the video file
+            "cvlc",
+            "--codec=h264_v4l2m2m",
+            "--vout=x11",
+            "--no-audio",
+            "--no-video-deco",
+            "--no-snapshot-preview",
+            "--no-overlay",
+            "--fullscreen",
+            "--loop",
+            "--no-osd",
+            "--no-video-title-show",
+            "--video-on-top",
+            "--file-caching=5000",
+            "--network-caching=5000",
+            "--fps-trust",
+            "--verbose=2",
+            converted_file_path
         ]
 
         # Start VLC
-        process = subprocess.Popen(vlc_cmd)
+        process = subprocess.Popen(vlc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        logging.info(f"Started playing video: {file_path}")
+        logging.info(f"Started playing converted video: {converted_file_path}")
 
         # Wait for the specified duration
         time.sleep(DAYS_TO_RUN * 24 * 3600)
@@ -162,7 +226,20 @@ def play_video(file_path: str) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
 
+        # Capture any output for debugging
+        stdout, stderr = process.communicate()
+        if stdout:
+            logging.info(f"VLC stdout: {stdout.decode()}")
+        if stderr:
+            logging.error(f"VLC stderr: {stderr.decode()}")
+
         logging.info(f"Video played for {DAYS_TO_RUN} days and terminated.")
+
+        # Clean up the converted file
+        if converted_file_path != file_path:
+            os.remove(converted_file_path)
+            logging.info(f"Removed converted file: {converted_file_path}")
+
     except Exception as e:
         logging.error(f"An error occurred while playing the video: {e}")
 
