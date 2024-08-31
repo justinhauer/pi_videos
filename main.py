@@ -126,15 +126,16 @@ def download_file(file_id: str, file_name: str) -> str:
         return ""
 
 
-def convert_video(input_path: str) -> str:
+def convert_video(input_path: str, timeout: int = 300) -> Optional[str]:
     """
-    Convert the input video to H.264 format using FFmpeg.
+    Convert the input video to H.264 format using FFmpeg with a timeout and progress reporting.
 
     Args:
         input_path (str): The path to the input video file.
+        timeout (int): Maximum time in seconds to wait for conversion.
 
     Returns:
-        str: The path to the converted video file.
+        Optional[str]: The path to the converted video file, or None if conversion failed.
     """
     output_path = os.path.splitext(input_path)[0] + "_converted.mp4"
     try:
@@ -142,25 +143,51 @@ def convert_video(input_path: str) -> str:
             "ffmpeg",
             "-i", input_path,
             "-c:v", "libx264",
-            "-preset", "medium",
+            "-preset", "medium",  # Changed from ultrafast to medium for better balance
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "128k",
+            "-y",
+            "-progress", "pipe:1",  # Output progress information to stdout
             output_path
         ]
-        logging.info("Converting video file")
-        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
 
-        if process.returncode != 0:
-            logging.error(f"FFmpeg conversion failed: {stderr.decode()}")
-            return input_path
+        logging.info(f"Starting FFmpeg conversion: {' '.join(ffmpeg_cmd)}")
+
+        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+        start_time = time.time()
+        last_progress_time = start_time
+
+        while True:
+            if process.poll() is not None:
+                break
+            if time.time() - start_time > timeout:
+                process.terminate()
+                logging.error(f"FFmpeg conversion timed out after {timeout} seconds")
+                return None
+
+            output = process.stdout.readline()
+            if output:
+                if "out_time_ms" in output:
+                    current_time = time.time()
+                    if current_time - last_progress_time >= 10:  # Log progress every 10 seconds
+                        logging.info(f"Conversion in progress: {output.strip()}")
+                        last_progress_time = current_time
+
+        returncode = process.poll()
+        _, stderr = process.communicate()
+
+        if returncode != 0:
+            logging.error(f"FFmpeg conversion failed with return code {returncode}")
+            logging.error(f"FFmpeg stderr: {stderr}")
+            return None
 
         logging.info(f"Video converted successfully: {output_path}")
         return output_path
     except Exception as e:
         logging.error(f"An error occurred during video conversion: {e}")
-        return input_path
+        return None
 
 
 def play_video(file_path: str) -> None:
@@ -298,7 +325,7 @@ def main() -> None:
     """
     latest_file: Optional[Dict[str, Any]] = get_latest_file()
     if latest_file:
-    file_path: str = download_file(latest_file["id"], latest_file["name"])
+        file_path: str = download_file(latest_file["id"], latest_file["name"])
         if file_path:
             play_video(file_path)
             cleanup(file_path)
