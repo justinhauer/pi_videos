@@ -126,19 +126,6 @@ def download_file(file_id: str, file_name: str) -> str:
         return ""
 
 
-import os
-import time
-import logging
-from typing import Optional, Dict, Any, List, Generator
-from googleapiclient.http import MediaIoBaseDownload
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-import io
-import subprocess
-
-
-# ... (previous imports and setup code remains the same)
-
 def convert_video(input_path: str) -> str:
     """
     Convert the input video to H.264 format using FFmpeg.
@@ -179,6 +166,7 @@ def convert_video(input_path: str) -> str:
 def play_video(file_path: str) -> None:
     """
     Convert the video, then launch VLC to play it with optimized settings.
+    Includes enhanced error checking and logging.
 
     Args:
         file_path (str): The full path to the video file to be played.
@@ -189,6 +177,7 @@ def play_video(file_path: str) -> None:
 
         # Ensure DISPLAY is set for GUI applications
         os.environ['DISPLAY'] = ':0'
+        logging.info(f"DISPLAY environment variable set to: {os.environ['DISPLAY']}")
 
         # VLC command with optimized settings
         vlc_cmd = [
@@ -211,29 +200,54 @@ def play_video(file_path: str) -> None:
             converted_file_path
         ]
 
-        # Start VLC
-        process = subprocess.Popen(vlc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logging.info(f"Attempting to start VLC with command: {' '.join(vlc_cmd)}")
 
-        logging.info(f"Started playing converted video: {converted_file_path}")
+        # Start VLC
+        process = subprocess.Popen(vlc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        logging.info(f"VLC process started with PID: {process.pid}")
+
+        # Check if the process is still running after a short delay
+        time.sleep(5)
+        if process.poll() is None:
+            logging.info("VLC process is still running after 5 seconds")
+        else:
+            logging.error(f"VLC process exited prematurely with return code: {process.returncode}")
+            stdout, stderr = process.communicate()
+            logging.error(f"VLC stdout: {stdout}")
+            logging.error(f"VLC stderr: {stderr}")
+            raise Exception("VLC process exited prematurely")
 
         # Wait for the specified duration
-        time.sleep(DAYS_TO_RUN * 24 * 3600)
+        total_seconds = DAYS_TO_RUN * 24 * 3600
+        logging.info(f"Waiting for {DAYS_TO_RUN} days ({total_seconds} seconds)")
+
+        start_time = time.time()
+        while time.time() - start_time < total_seconds:
+            if process.poll() is not None:
+                logging.error("VLC process ended unexpectedly")
+                break
+            time.sleep(60)  # Check every minute
 
         # Terminate VLC
-        process.terminate()
-        try:
-            process.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        if process.poll() is None:
+            logging.info("Attempting to terminate VLC process")
+            process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                logging.warning("VLC process did not terminate, forcing kill")
+                process.kill()
 
         # Capture any output for debugging
         stdout, stderr = process.communicate()
         if stdout:
-            logging.info(f"VLC stdout: {stdout.decode()}")
+            logging.info(f"VLC stdout: {stdout}")
         if stderr:
-            logging.error(f"VLC stderr: {stderr.decode()}")
+            logging.error(f"VLC stderr: {stderr}")
 
-        logging.info(f"Video played for {DAYS_TO_RUN} days and terminated.")
+        actual_runtime = time.time() - start_time
+        logging.info(f"Video played for {actual_runtime:.2f} seconds")
 
         # Clean up the converted file
         if converted_file_path != file_path:
@@ -242,6 +256,7 @@ def play_video(file_path: str) -> None:
 
     except Exception as e:
         logging.error(f"An error occurred while playing the video: {e}")
+        raise
 
 
 def cleanup(file_path: str) -> None:
