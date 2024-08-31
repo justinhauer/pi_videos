@@ -148,7 +148,7 @@ def convert_video(input_path: str) -> str:
             "-b:a", "128k",
             output_path
         ]
-
+        logging.info("Converting video file")
         process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
 
@@ -166,7 +166,7 @@ def convert_video(input_path: str) -> str:
 def play_video(file_path: str) -> None:
     """
     Convert the video, then launch VLC to play it with optimized settings.
-    Includes enhanced error checking and logging.
+    Includes enhanced error checking, logging, and alternative methods.
 
     Args:
         file_path (str): The full path to the video file to be played.
@@ -179,11 +179,18 @@ def play_video(file_path: str) -> None:
         os.environ['DISPLAY'] = ':0'
         logging.info(f"DISPLAY environment variable set to: {os.environ['DISPLAY']}")
 
+        # Check if VLC is installed
+        try:
+            subprocess.run(["vlc", "--version"], check=True, capture_output=True, text=True)
+            logging.info("VLC is installed and accessible")
+        except subprocess.CalledProcessError:
+            logging.error("VLC is not installed or not accessible")
+            raise Exception("VLC is not installed or not accessible")
+
         # VLC command with optimized settings
         vlc_cmd = [
-            "cvlc",
+            "vlc",  # Changed from cvlc to vlc
             "--codec=h264_v4l2m2m",
-            "--vout=x11",
             "--no-audio",
             "--no-video-deco",
             "--no-snapshot-preview",
@@ -216,7 +223,19 @@ def play_video(file_path: str) -> None:
             stdout, stderr = process.communicate()
             logging.error(f"VLC stdout: {stdout}")
             logging.error(f"VLC stderr: {stderr}")
-            raise Exception("VLC process exited prematurely")
+
+            # Try alternative method: using os.system
+            logging.info("Attempting to start VLC using os.system")
+            os.system(f"vlc --codec=h264_v4l2m2m --fullscreen --loop {converted_file_path} &")
+            time.sleep(5)
+
+            # Check if VLC is running
+            try:
+                subprocess.run(["pgrep", "vlc"], check=True, capture_output=True)
+                logging.info("VLC process found after using os.system")
+            except subprocess.CalledProcessError:
+                logging.error("VLC process not found after using os.system")
+                raise Exception("Failed to start VLC")
 
         # Wait for the specified duration
         total_seconds = DAYS_TO_RUN * 24 * 3600
@@ -258,7 +277,6 @@ def play_video(file_path: str) -> None:
         logging.error(f"An error occurred while playing the video: {e}")
         raise
 
-
 def cleanup(file_path: str) -> None:
     """
     Remove the specified file from the filesystem.
@@ -280,7 +298,7 @@ def main() -> None:
     """
     latest_file: Optional[Dict[str, Any]] = get_latest_file()
     if latest_file:
-        file_path: str = download_file(latest_file["id"], latest_file["name"])
+    file_path: str = download_file(latest_file["id"], latest_file["name"])
         if file_path:
             play_video(file_path)
             cleanup(file_path)
